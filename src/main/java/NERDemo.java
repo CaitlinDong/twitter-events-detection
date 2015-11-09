@@ -40,6 +40,7 @@ import java.util.List;
 public class NERDemo {
 
     public static void main(String[] args) throws Exception {
+        //CRFClassifier crf = new CRFClassifier();
 
         String serializedClassifier = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz";
 

@@ -9,9 +9,6 @@ import edu.stanford.nlp.sequences.DocumentReaderAndWriter
 import edu.stanford.nlp.util.Triple
 import java.util.List
 
-/**
- * Created by namitsharma on 11/2/15.
- */
 object NER {
   def main(args: Array[String]): Unit = {
     var serializedClassifier: String = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz"
@@ -20,6 +17,6 @@ object NER {
     for (str <- example) {
       System.out.println(classifier.classifyWithInlineXML(str))
     }
-    System.out.println("---")
+    System.out.println("---");
   }
 }
