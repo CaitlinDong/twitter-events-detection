@@ -1,6 +1,7 @@
 package ted
 
 import akka.io.Udp.SO.Broadcast
+import edu.stanford.nlp.parser.nndep.Classifier
 import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.apache.spark.SparkContext._
@@ -18,6 +19,11 @@ import edu.stanford.nlp.ling.CoreAnnotations
 import edu.stanford.nlp.sequences.DocumentReaderAndWriter
 import edu.stanford.nlp.util.Triple
 import java.util.List
+
+
+
+import scala.collection.immutable.List
+
 
 /* For extracting Location from XML */
 import org.apache.commons.lang.StringUtils
@@ -47,9 +53,8 @@ import org.w3c.dom.Document
  */
 object ServiceBootstrap {
 
-  def extractLocation(x:String,serializedClassifier: String): String = {
-    val classifier: AbstractSequenceClassifier[CoreLabel] = CRFClassifier.getClassifier(serializedClassifier)
-    val tweet_with_NER = classifier.classifyWithInlineXML(x);
+  def extractLocationCoordinates(tweet_with_NER:String): String = {
+
     if (tweet_with_NER.contains("<LOCATION>")) {
       val locations_array = StringUtils.substringsBetween(tweet_with_NER, "<LOCATION>", "</LOCATION>")
       val locations_string = locations_array.mkString(",");
@@ -120,6 +125,12 @@ object ServiceBootstrap {
 
     //Create stream from twitter
     val stream = TwitterUtils.createStream(ssc, None, filters)
+    //val stream = ssc.textFileStream("./src/main/tweets/")
+
+   // val stream = ssc.textFileStream("./src/main/tweets/")
+
+    //val stream = ssc.socketTextStream("localhost", 7777)
+
 
     /* Uncomment if you wanna start saving the tweets */
     //stream.map(x=>x.getText()).saveAsTextFiles("./src/main/tweets/earthquake_tweets");
@@ -129,6 +140,16 @@ object ServiceBootstrap {
       Code to use the location Dataset
      */
     //val locationFile = sc.textFile("/Users/namitsharma/Dropbox/Projects/spark-1.5.0-bin-hadoop2.6/worldcitiespop.txt");
+    //import sqlContext._
+    //import sqlContext.implicits._
+    //case class Locations(Country :String , City:String, AccentCity: String, Region: String, Population:String, Latitude: String, Longitude:String)
+    //val sqlContext = new org.apache.spark.sql.SQLContext(sc)
+    //val locations_df = sc.textFile("/Users/namitsharma/Dropbox/Projects/spark-1.5.0-bin-hadoop2.6/worldcitiespop.txt").map(_.split(",")).map(p => Locations(p(0),p(1),p(2),p(3),p(4),p(5),p(6))).toDF()
+    //val teenagers = sqlContext.sql("SELECT Country,Lat,Long FROM people WHERE age >= 13 AND age <= 19")
+    //locations_df.registerTempTable("mylocations")
+
+    //val c = sqlContext.sql("SELECT count(*) FROM mylocations")
+
 
     //Split a record into an Array(Country, City, AccentCity, Region, Population, Latitude, Longitude)
     //val lines = locationFile.map(line => line.split(",")).cache();
@@ -146,7 +167,9 @@ object ServiceBootstrap {
      */
 
     var serializedClassifier: String = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz"
-    var classifier: AbstractSequenceClassifier[CoreLabel] = CRFClassifier.getClassifier(serializedClassifier)
+    object NER {
+      @transient lazy val classifier: AbstractSequenceClassifier[CoreLabel] = CRFClassifier.getClassifier(serializedClassifier)
+    }
     //val broadcastVar = sc.broadcast(classifier);
 
     //Simply printing it
@@ -155,7 +178,8 @@ object ServiceBootstrap {
 
     stream.foreachRDD(rdd => {
       println("\nNumber of Tweets in 2 second batches is (%s)".format(rdd.count()))
-      val tweetTextArray = rdd.map(x => (x.getText(),extractLocation(x.getText(),serializedClassifier)));
+      val tweetTextArray = rdd.map(x => (x.getText,extractLocationCoordinates(NER.classifier.classifyWithInlineXML(x.getText))));
+      //val tweetTextArray = rdd.map(x=>NER.classifier.classifyWithInlineXML(x.getText));
       tweetTextArray.foreach{t => println(t)}
 
     })
