@@ -8,5 +8,6 @@ object Dependencies {
     "org.apache.spark" %% "spark-streaming" % sparkV,
     "org.apache.spark" %% "spark-streaming-twitter" % sparkV,
     "edu.stanford.nlp" % "stanford-corenlp" % "3.5.2"
+   // "org.twitter4j" % "twitter4j-core" % "4.0.4"
   )
 }

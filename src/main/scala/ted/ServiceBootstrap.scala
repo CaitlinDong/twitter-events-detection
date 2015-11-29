@@ -9,6 +9,7 @@ import org.apache.spark.streaming.twitter._
 import org.apache.spark.{SparkContext, SparkConf}
 import org.apache.log4j.{Level, Logger}
 import ted.StreamingExamples
+import twitter4j.json.DataObjectFactory
 
 import scala.collection.mutable.ListBuffer
 
@@ -139,13 +140,13 @@ object ServiceBootstrap {
     val ssc = new StreamingContext(sc, Seconds(2))
 
     //Create stream from twitter
-    val stream = TwitterUtils.createStream(ssc, None, filters)
+    //val stream = TwitterUtils.createStream(ssc, None, filters)
 
-    //val stream = ssc.socketTextStream("localhost", 9999)
+    val stream = ssc.socketTextStream("localhost", 9999).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
+
 
     /* Uncomment if you wanna start saving the tweets */
     //stream.map(x=>x.getText()).saveAsTextFiles("./src/main/tweets/earthquake_tweets");
-
     //Declaring lazy NERClassifier
     var serializedClassifier: String = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz"
     object NER {
