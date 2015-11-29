@@ -22,7 +22,6 @@ import edu.stanford.nlp.sequences.DocumentReaderAndWriter
 import edu.stanford.nlp.util.Triple
 
 
-
 import scala.collection.immutable.List
 
 
@@ -67,11 +66,11 @@ object ServiceBootstrap {
   }
   */
 
-  def splitForEachLocation(tweetTextWithLocations : List[String]): List[List[String]] = {
-    val splitBuffer: ListBuffer[List[String]] = new ListBuffer()
+  def splitForEachLocation(tweet: twitter4j.Status, locations : List[String]): List[(String,twitter4j.Status)] = {
+    val splitBuffer: ListBuffer[(String,twitter4j.Status) ] = new ListBuffer()
 
-    for (i <- 1 to tweetTextWithLocations.length-1)
-      splitBuffer.append(List(tweetTextWithLocations(i), tweetTextWithLocations(0)))
+    for (i <- 0 to locations.length-1)
+      splitBuffer.append((locations(i),tweet))
     splitBuffer.toList
   }
 
@@ -124,7 +123,7 @@ object ServiceBootstrap {
 
     //Setting up Spark Context
     val sparkConf = new SparkConf().setAppName("ServiceBootstrap")
-    val sc = new SparkContext(sparkConf);
+    val sc = new SparkContext(sparkConf)
 
     val Array(consumerKey, consumerSecret, accessToken, accessTokenSecret) = args.take(4)
     val filters = args.takeRight(args.length - 4)
@@ -140,8 +139,9 @@ object ServiceBootstrap {
     val ssc = new StreamingContext(sc, Seconds(2))
 
     //Create stream from twitter
-    //val stream = TwitterUtils.createStream(ssc, None, filters)
-    val stream = ssc.socketTextStream("localhost", 9999)
+    val stream = TwitterUtils.createStream(ssc, None, filters)
+
+    //val stream = ssc.socketTextStream("localhost", 9999)
 
     /* Uncomment if you wanna start saving the tweets */
     //stream.map(x=>x.getText()).saveAsTextFiles("./src/main/tweets/earthquake_tweets");
@@ -156,8 +156,8 @@ object ServiceBootstrap {
        To Extract Location Data We use Stanford's NER
      */
 
-    //List(Tweet,Location1,Location2...)
-    val stream2 = stream.map(x => x :: extractLocations(NER.classifier.classifyWithInlineXML(x)))
+    //Tuple2(Tweet,List[Locations])
+    val stream2 = stream.map(x => (x,extractLocations(NER.classifier.classifyWithInlineXML(x.getText))))
     //With Twitter:
     //val stream2 = stream.map(x => x :: extractLocations(NER.classifier.classifyWithInlineXML(x.getText))).map(x => x if ...)
 
@@ -167,7 +167,7 @@ object ServiceBootstrap {
     })*/
 
     //List(Location,Tweet)
-    val stream3 = stream2.flatMap(t => splitForEachLocation(t))
+    val stream3 = stream2.flatMap(t => splitForEachLocation(t._1,t._2))
     /*
     stream3.foreachRDD(rdd => {
       println("Locations with Tweets extracted from 2 second batches (%s)".format(rdd.count()))
@@ -177,10 +177,12 @@ object ServiceBootstrap {
 
 
     //Code for Clustering on a window goes here
-    val myWindowedStream = stream3.map(x => (x(0),x(1))).window(Seconds(30), Seconds(10))
+
+    val myWindowedStream = stream3.map(x => (x._1,x._2.getText)).window(Seconds(30), Seconds(10))
     myWindowedStream.foreachRDD(rdd => {
       println("\nGrouping by location (%s)".format(rdd.count()))
-      //(Location,CompactBuffer())
+
+      //(number_of_tweets_from_that_location, (Location,CompactBuffer(),List(Lat,Long)))
       val new_rdd = rdd.groupByKey().map(x=>(x._2.size,(x,getLatLongPositions(x._1).toList))).sortByKey(false)
       new_rdd.foreach{t => println(t)}
     })
