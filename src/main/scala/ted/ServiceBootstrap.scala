@@ -153,15 +153,8 @@ object ServiceBootstrap {
     }
 
     /* Code for Location Extraction Goes here
-       Extract Location Data to get a stream like (tweet,location) where location is ideally found from tweetText
-       We first use Stanford's NER to get location and then get Coordinates from the location.
+       To Extract Location Data We use Stanford's NER
      */
-
-
-
-    //Test
-    //val x = sc.parallelize(List(List("text1","loc11","loc12"),List("text3","loc31"),List("text4","loc41","loc42","loc43")))
-    //val z = x.flatMap( t => splitForEachLocation(t))
 
     //List(Tweet,Location1,Location2...)
     val stream2 = stream.map(x => x :: extractLocations(NER.classifier.classifyWithInlineXML(x)))
@@ -188,7 +181,7 @@ object ServiceBootstrap {
     myWindowedStream.foreachRDD(rdd => {
       println("\nGrouping by location (%s)".format(rdd.count()))
       //(Location,CompactBuffer())
-      val new_rdd = rdd.groupByKey()
+      val new_rdd = rdd.groupByKey().map(x=>(x._2.size,(x,getLatLongPositions(x._1).toList))).sortByKey(false)
       new_rdd.foreach{t => println(t)}
     })
 
