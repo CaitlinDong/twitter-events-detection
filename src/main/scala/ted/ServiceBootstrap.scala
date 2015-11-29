@@ -10,6 +10,8 @@ import org.apache.spark.{SparkContext, SparkConf}
 import org.apache.log4j.{Level, Logger}
 import ted.StreamingExamples
 
+import scala.collection.mutable.ListBuffer
+
 /* For Stanford NLP */
 import edu.stanford.nlp.ie.AbstractSequenceClassifier
 import edu.stanford.nlp.ie.crf._
@@ -18,7 +20,6 @@ import edu.stanford.nlp.ling.CoreLabel
 import edu.stanford.nlp.ling.CoreAnnotations
 import edu.stanford.nlp.sequences.DocumentReaderAndWriter
 import edu.stanford.nlp.util.Triple
-import java.util.List
 
 
 
@@ -52,17 +53,32 @@ import org.w3c.dom.Document
  *
  */
 object ServiceBootstrap {
-
+/*
   def extractLocationCoordinates(tweet_with_NER:String): String = {
 
     if (tweet_with_NER.contains("<LOCATION>")) {
       val locations_array = StringUtils.substringsBetween(tweet_with_NER, "<LOCATION>", "</LOCATION>")
-      val locations_string = locations_array.mkString(",");
-      val lat_long_array = locations_array.map(x=>getLatLongPositions(x).mkString(" "))
-      val lat_long_string = lat_long_array.mkString(",")
-      return locations_string+","+lat_long_string
+      val locations_string = locations_array(0);
+      //val lat_long_array = locations_array.map(x=>getLatLongPositions(x).mkString(" "))
+      //val lat_long_string = lat_long_array.mkString(",")
+      return locations_string;//+","+lat_long_string
     }
     return ""
+  }
+  */
+
+  def splitForEachLocation(tweetTextWithLocations : List[String]): List[List[String]] = {
+    val splitBuffer: ListBuffer[List[String]] = new ListBuffer()
+
+    for (i <- 1 to tweetTextWithLocations.length-1)
+      splitBuffer.append(List(tweetTextWithLocations(i), tweetTextWithLocations(0)))
+    splitBuffer.toList
+  }
+
+  def extractLocations(tweetText: String): List[String] = {
+    if (tweetText.contains("<LOCATION>"))
+      StringUtils.substringsBetween(tweetText, "<LOCATION>", "</LOCATION>").toList.map(_.toLowerCase)
+    else List("No Location")
   }
 
   @throws(classOf[Exception])
@@ -124,77 +140,57 @@ object ServiceBootstrap {
     val ssc = new StreamingContext(sc, Seconds(2))
 
     //Create stream from twitter
-    val stream = TwitterUtils.createStream(ssc, None, filters)
-    //val stream = ssc.textFileStream("./src/main/tweets/")
-
-   // val stream = ssc.textFileStream("./src/main/tweets/")
-
-    //val stream = ssc.socketTextStream("localhost", 7777)
-
+    //val stream = TwitterUtils.createStream(ssc, None, filters)
+    val stream = ssc.socketTextStream("localhost", 9999)
 
     /* Uncomment if you wanna start saving the tweets */
     //stream.map(x=>x.getText()).saveAsTextFiles("./src/main/tweets/earthquake_tweets");
 
-
-    /*
-      Code to use the location Dataset
-     */
-    //val locationFile = sc.textFile("/Users/namitsharma/Dropbox/Projects/spark-1.5.0-bin-hadoop2.6/worldcitiespop.txt");
-    //import sqlContext._
-    //import sqlContext.implicits._
-    //case class Locations(Country :String , City:String, AccentCity: String, Region: String, Population:String, Latitude: String, Longitude:String)
-    //val sqlContext = new org.apache.spark.sql.SQLContext(sc)
-    //val locations_df = sc.textFile("/Users/namitsharma/Dropbox/Projects/spark-1.5.0-bin-hadoop2.6/worldcitiespop.txt").map(_.split(",")).map(p => Locations(p(0),p(1),p(2),p(3),p(4),p(5),p(6))).toDF()
-    //val teenagers = sqlContext.sql("SELECT Country,Lat,Long FROM people WHERE age >= 13 AND age <= 19")
-    //locations_df.registerTempTable("mylocations")
-
-    //val c = sqlContext.sql("SELECT count(*) FROM mylocations")
-
-
-    //Split a record into an Array(Country, City, AccentCity, Region, Population, Latitude, Longitude)
-    //val lines = locationFile.map(line => line.split(",")).cache();
-
-    //Just take cities
-    //val cities = lines.map(line=>line(1)).collect();
-    //val broadcastVar = sc.broadcast(cities);
-    //cities.foreach({t=>println(t)});
-
-
+    //Declaring lazy NERClassifier
+    var serializedClassifier: String = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz"
+    object NER {
+      @transient lazy val classifier: AbstractSequenceClassifier[CoreLabel] = CRFClassifier.getClassifier(serializedClassifier)
+    }
 
     /* Code for Location Extraction Goes here
        Extract Location Data to get a stream like (tweet,location) where location is ideally found from tweetText
        We first use Stanford's NER to get location and then get Coordinates from the location.
      */
 
-    var serializedClassifier: String = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz"
-    object NER {
-      @transient lazy val classifier: AbstractSequenceClassifier[CoreLabel] = CRFClassifier.getClassifier(serializedClassifier)
-    }
-    //val broadcastVar = sc.broadcast(classifier);
-
-    //Simply printing it
-    //It will be printed like this : (tweet text,Location1,Location2...,Lat1 Long1,Lat2 Long2...)
-   //example - (A 3.18 magnitude earthquake has occurred near Nukuhou, Bay Of Plenty, New Zealand on 11/9/15, 1:35 AM! https://t.co/WIh9CEPyS3,Nukuhou,Bay Of Plenty,New Zealand,-38.1250730 177.1295343,-37.6825027 176.1880232,-40.9005570 174.8859710)
-
-    stream.foreachRDD(rdd => {
-      println("\nNumber of Tweets in 2 second batches is (%s)".format(rdd.count()))
-      val tweetTextArray = rdd.map(x => (x.getText,extractLocationCoordinates(NER.classifier.classifyWithInlineXML(x.getText))));
-      //val tweetTextArray = rdd.map(x=>NER.classifier.classifyWithInlineXML(x.getText));
-      tweetTextArray.foreach{t => println(t)}
-
-    })
 
 
+    //Test
+    //val x = sc.parallelize(List(List("text1","loc11","loc12"),List("text3","loc31"),List("text4","loc41","loc42","loc43")))
+    //val z = x.flatMap( t => splitForEachLocation(t))
+
+    //List(Tweet,Location1,Location2...)
+    val stream2 = stream.map(x => x :: extractLocations(NER.classifier.classifyWithInlineXML(x)))
+    //With Twitter:
+    //val stream2 = stream.map(x => x :: extractLocations(NER.classifier.classifyWithInlineXML(x.getText))).map(x => x if ...)
+
+    /*stream2.foreachRDD(rdd => {
+      println("Tweets extracted from 2 second batches (%s)".format(rdd.count()))
+      rdd.foreach{t => println(t(0))}
+    })*/
+
+    //List(Location,Tweet)
+    val stream3 = stream2.flatMap(t => splitForEachLocation(t))
     /*
-       //Code for Clustering on a window goes here
-
-       val myWindowedStream = stream.window(Seconds(30), Seconds(10))
-       myWindowedStream.foreachRDD(y => {
-         println(y.map(x => x.getText().length()).reduce((a, b) => a + b))
-       })
+    stream3.foreachRDD(rdd => {
+      println("Locations with Tweets extracted from 2 second batches (%s)".format(rdd.count()))
+      rdd.foreach{t => println(t)}
+    })*/
 
 
-   */
+
+    //Code for Clustering on a window goes here
+    val myWindowedStream = stream3.map(x => (x(0),x(1))).window(Seconds(30), Seconds(10))
+    myWindowedStream.foreachRDD(rdd => {
+      println("\nGrouping by location (%s)".format(rdd.count()))
+      //(Location,CompactBuffer())
+      val new_rdd = rdd.groupByKey()
+      new_rdd.foreach{t => println(t)}
+    })
 
 
     ssc.start()
