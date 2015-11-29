@@ -81,8 +81,8 @@ object ServiceBootstrap {
     else List("No Location")
   }
 
-  @throws(classOf[Exception])
-  def getLatLongPositions(address: String): Array[String] = {
+  //@throws(classOf[Exception])
+  def getLatLongPositions(address: String): List[String] = {
     var responseCode: Int = 0
     val api: String = "http://maps.googleapis.com/maps/api/geocode/xml?address=" + URLEncoder.encode(address, "UTF-8") + "&sensor=true"
     val url: URL = new URL(api)
@@ -102,13 +102,14 @@ object ServiceBootstrap {
         val latitude: String = expr.evaluate(document, XPathConstants.STRING).asInstanceOf[String]
         expr = xpath.compile("//geometry/location/lng")
         val longitude: String = expr.evaluate(document, XPathConstants.STRING).asInstanceOf[String]
-        return Array[String](latitude, longitude)
+        List(latitude, longitude)
       }
       else {
-        throw new Exception("Error from the API - response status: " + status)
+        //throw new Exception("Error from the API - response status: " + status)
+        List()
       }
     }
-    return null
+    else List()
   }
 
   def main(args: Array[String]) {
@@ -140,9 +141,9 @@ object ServiceBootstrap {
     val ssc = new StreamingContext(sc, Seconds(2))
 
     //Create stream from twitter
-    //val stream = TwitterUtils.createStream(ssc, None, filters)
+    val stream = TwitterUtils.createStream(ssc, None, filters)
 
-    val stream = ssc.socketTextStream("localhost", 9999).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
+    //val stream = ssc.socketTextStream("localhost", 9999).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
 
 
     /* Uncomment if you wanna start saving the tweets */
@@ -158,7 +159,14 @@ object ServiceBootstrap {
      */
 
     //Tuple2(Tweet,List[Locations])
-    val stream2 = stream.map(x => (x,extractLocations(NER.classifier.classifyWithInlineXML(x.getText))))
+    val stream2 = stream
+      .map(x => (x,extractLocations(NER.classifier.classifyWithInlineXML(x.getText))))
+      .map(x => {
+        if (x._2.head equals "No Location"){
+          (x._1,List("someother location"))
+        }
+        else x
+      })
     //With Twitter:
     //val stream2 = stream.map(x => x :: extractLocations(NER.classifier.classifyWithInlineXML(x.getText))).map(x => x if ...)
 
@@ -184,7 +192,7 @@ object ServiceBootstrap {
       println("\nGrouping by location (%s)".format(rdd.count()))
 
       //(number_of_tweets_from_that_location, (Location,CompactBuffer(),List(Lat,Long)))
-      val new_rdd = rdd.groupByKey().map(x=>(x._2.size,(x,getLatLongPositions(x._1).toList))).sortByKey(false)
+      val new_rdd = rdd.groupByKey().map(x => (x._2.size,(x,getLatLongPositions(x._1)))).sortByKey(false)
       new_rdd.foreach{t => println(t)}
     })
 
