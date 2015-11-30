@@ -141,9 +141,10 @@ object ServiceBootstrap {
     val ssc = new StreamingContext(sc, Seconds(2))
 
     //Create stream from twitter
-    val stream = TwitterUtils.createStream(ssc, None, filters)
+    //val stream = TwitterUtils.createStream(ssc, None, filters)
 
-    //val stream = ssc.socketTextStream("localhost", 9999).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
+    //Take twitter json from socket
+    val stream = ssc.socketTextStream("localhost", 9999).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
 
 
     /* Uncomment if you wanna start saving the tweets */
@@ -167,15 +168,13 @@ object ServiceBootstrap {
         }
         else x
       })
-    //With Twitter:
-    //val stream2 = stream.map(x => x :: extractLocations(NER.classifier.classifyWithInlineXML(x.getText))).map(x => x if ...)
 
     /*stream2.foreachRDD(rdd => {
       println("Tweets extracted from 2 second batches (%s)".format(rdd.count()))
       rdd.foreach{t => println(t(0))}
     })*/
 
-    //List(Location,Tweet)
+    //(Location,TweetStatus)
     val stream3 = stream2.flatMap(t => splitForEachLocation(t._1,t._2))
     /*
     stream3.foreachRDD(rdd => {
@@ -184,15 +183,14 @@ object ServiceBootstrap {
     })*/
 
 
-
     //Code for Clustering on a window goes here
-
     val myWindowedStream = stream3.map(x => (x._1,x._2.getText)).window(Seconds(30), Seconds(10))
     myWindowedStream.foreachRDD(rdd => {
       println("\nGrouping by location (%s)".format(rdd.count()))
 
-      //(number_of_tweets_from_that_location, (Location,CompactBuffer(),List(Lat,Long)))
-      val new_rdd = rdd.groupByKey().map(x => (x._2.size,(x,getLatLongPositions(x._1)))).sortByKey(false)
+
+      val new_rdd = rdd.groupByKey() //(Location,CompactBuffer())
+        .map(x => (x._2.size,(x,getLatLongPositions(x._1)))).sortByKey(false) //(number_of_tweets_from_that_location,,List(Lat,Long)
       new_rdd.foreach{t => println(t)}
     })
 
