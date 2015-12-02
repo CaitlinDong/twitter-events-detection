@@ -11,6 +11,7 @@ import org.apache.log4j.{Level, Logger}
 import ted.StreamingExamples
 import twitter4j.json.DataObjectFactory
 
+import scala.collection.immutable.List
 import scala.collection.mutable.ListBuffer
 
 /* For Stanford NLP */
@@ -22,10 +23,6 @@ import edu.stanford.nlp.ling.CoreAnnotations
 import edu.stanford.nlp.sequences.DocumentReaderAndWriter
 import edu.stanford.nlp.util.Triple
 
-
-import scala.collection.immutable.List
-
-
 /* For extracting Location from XML */
 import org.apache.commons.lang.StringUtils
 
@@ -34,8 +31,7 @@ import java.net.URLConnection
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.io.InputStreamReader
-import java.io.BufferedReader
+import java.io.{PrintStream, InputStreamReader, BufferedReader}
 import javax.xml.parsers.DocumentBuilder
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.xpath.XPath
@@ -44,7 +40,6 @@ import javax.xml.xpath.XPathFactory
 import javax.xml.xpath.XPathConstants
 import org.w3c.dom.Document
 
-
 /**
  * Twitter Events Detection -
  * Clusters tweets from the Twitter Stream based on location information extracted from the tweet text.
@@ -52,20 +47,8 @@ import org.w3c.dom.Document
  * command line arguments.
  *
  */
-object ServiceBootstrap {
-/*
-  def extractLocationCoordinates(tweet_with_NER:String): String = {
 
-    if (tweet_with_NER.contains("<LOCATION>")) {
-      val locations_array = StringUtils.substringsBetween(tweet_with_NER, "<LOCATION>", "</LOCATION>")
-      val locations_string = locations_array(0);
-      //val lat_long_array = locations_array.map(x=>getLatLongPositions(x).mkString(" "))
-      //val lat_long_string = lat_long_array.mkString(",")
-      return locations_string;//+","+lat_long_string
-    }
-    return ""
-  }
-  */
+object ServiceBootstrap {
 
   def splitForEachLocation(tweet: twitter4j.Status, locations : List[String]): List[(String,twitter4j.Status)] = {
     val splitBuffer: ListBuffer[(String,twitter4j.Status) ] = new ListBuffer()
@@ -83,7 +66,12 @@ object ServiceBootstrap {
 
   //@throws(classOf[Exception])
   def getLatLongPositions(address: String): List[String] = {
+    if(address equals("someother location"))
+      {
+        return List()
+      }
     var responseCode: Int = 0
+    //val api: String = "http://www.datasciencetoolkit.org/maps/api/geocode/json?sensor=false&address=" + URLEncoder.encode(address, "UTF-8")
     val api: String = "http://maps.googleapis.com/maps/api/geocode/xml?address=" + URLEncoder.encode(address, "UTF-8") + "&sensor=true"
     val url: URL = new URL(api)
     val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
@@ -106,36 +94,30 @@ object ServiceBootstrap {
       }
       else {
         //throw new Exception("Error from the API - response status: " + status)
-        List()
+        List("NoCoords")
       }
     }
     else List()
   }
 
   def main(args: Array[String]) {
-    if (args.length < 4) {
-      System.err.println("Usage: TwitterPopularTags <consumer key> <consumer secret> " +
-        "<access token> <access token secret> [<filters>]")
-      System.exit(1)
-    }
 
-    //Setting Streaming Log Levels
-    StreamingExamples.setStreamingLogLevels()
-    //Logger.getRootLogger.setLevel(Level.WARN)
-
-    //Setting up Spark Context
-    val sparkConf = new SparkConf().setAppName("ServiceBootstrap")
-    val sc = new SparkContext(sparkConf)
-
-    val Array(consumerKey, consumerSecret, accessToken, accessTokenSecret) = args.take(4)
-    val filters = args.takeRight(args.length - 4)
+    val myCommandlineParameters = Array("63jvU9P2FaJLcqh704yZ2rPWs","tEJwsJNPNvckcQXqJEQDNVjvE8hvitEjV6is5OvqCh1DYZLiAo","98218547-l3RyOPgaGthTDRQJxNAy2eMigpdNtNxgJxJoc9o0j","RoOTzJyMxps7meXV0cUiTjLJPuCY3GDA5rqbkFc2GmKsR","earthquake","tremor","quake","richter")
+    val Array(consumerKey, consumerSecret, accessToken, accessTokenSecret) = myCommandlineParameters.take(4)
+    val filters = myCommandlineParameters.takeRight(myCommandlineParameters.length - 4)
 
     // Set the system properties so that Twitter4j library used by twitter stream
-    // can use them to generat OAuth credentials
     System.setProperty("twitter4j.oauth.consumerKey", consumerKey)
     System.setProperty("twitter4j.oauth.consumerSecret", consumerSecret)
     System.setProperty("twitter4j.oauth.accessToken", accessToken)
     System.setProperty("twitter4j.oauth.accessTokenSecret", accessTokenSecret)
+
+    //Setting Streaming Log Levels
+    StreamingExamples.setStreamingLogLevels()
+
+    //Setting up Spark Context
+    val sparkConf = new SparkConf().setMaster("local[*]").setAppName("ServiceBootstrap")
+    val sc = new SparkContext(sparkConf)
 
     //Setup Spark Streaming Context
     val ssc = new StreamingContext(sc, Seconds(2))
@@ -143,25 +125,21 @@ object ServiceBootstrap {
     //Create stream from twitter
     //val stream = TwitterUtils.createStream(ssc, None, filters)
 
-    //Take twitter json from socket
-    val stream = ssc.socketTextStream("localhost", 9999).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
-
+    //Take Twitter json data from socket
+    val stream = ssc.socketTextStream("localhost", 9998).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
 
     /* Uncomment if you wanna start saving the tweets */
-    //stream.map(x=>x.getText()).saveAsTextFiles("./src/main/tweets/earthquake_tweets");
+    //stream.saveAsTextFiles("./src/main/tweets/earthquake_tweets");
+
     //Declaring lazy NERClassifier
     var serializedClassifier: String = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz"
     object NER {
       @transient lazy val classifier: AbstractSequenceClassifier[CoreLabel] = CRFClassifier.getClassifier(serializedClassifier)
     }
 
-    /* Code for Location Extraction Goes here
-       To Extract Location Data We use Stanford's NER
-     */
-
-    //Tuple2(Tweet,List[Locations])
+    //Location Extraction using Stanford's NER
     val stream2 = stream
-      .map(x => (x,extractLocations(NER.classifier.classifyWithInlineXML(x.getText))))
+      .map(x => (x,extractLocations(NER.classifier.classifyWithInlineXML(x.getText))))//(twitter4j.Status,List[LocationString])
       .map(x => {
         if (x._2.head equals "No Location"){
           (x._1,List("someother location"))
@@ -169,31 +147,30 @@ object ServiceBootstrap {
         else x
       })
 
-    /*stream2.foreachRDD(rdd => {
-      println("Tweets extracted from 2 second batches (%s)".format(rdd.count()))
-      rdd.foreach{t => println(t(0))}
-    })*/
+    //Todo
+    //Remove commas     //s.map(c => if(c == '0') ' ' else c)
+    //Capitalize all first letter of all words
 
-    //(Location,TweetStatus)
-    val stream3 = stream2.flatMap(t => splitForEachLocation(t._1,t._2))
-    /*
-    stream3.foreachRDD(rdd => {
-      println("Locations with Tweets extracted from 2 second batches (%s)".format(rdd.count()))
-      rdd.foreach{t => println(t)}
-    })*/
+    //Setup a locationsHaspMap RDD
+    //val locationsHaspMap = sc.textFile("src/main/resources/coordinates");
 
+    //Split record by location
+    val stream3 = stream2.flatMap(t => splitForEachLocation(t._1,t._2))//(LocationString,twitter4j.Status)
 
     //Code for Clustering on a window goes here
-    val myWindowedStream = stream3.map(x => (x._1,x._2.getText)).window(Seconds(30), Seconds(10))
-    myWindowedStream.foreachRDD(rdd => {
-      println("\nGrouping by location (%s)".format(rdd.count()))
+    val myActivityStream = stream3
+      .map(x => (x._1,(x._2.getText,getLatLongPositions(x._1))))//(LocationString,(twitter4j.Status.getText,List(LatitudeString,LongitudeString)))
+      .window(Seconds(12*60*60), Seconds(10))
+      .groupByKey() //(Location,Iterable<(twitter4j.Status.getText,List(LatitudeString,LongitudeString))>)
 
+    myActivityStream.foreachRDD(rdd => {
+      println("\nMy Activity (%s)".format(rdd.count()))
 
-      val new_rdd = rdd.groupByKey() //(Location,CompactBuffer())
-        .map(x => (x._2.size,(x,getLatLongPositions(x._1)))).sortByKey(false) //(number_of_tweets_from_that_location,,List(Lat,Long)
+      val new_rdd = rdd.map(x => (x._2.size,(x._1,x._2.head._2))).filter(_._1>=3).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
+
       new_rdd.foreach{t => println(t)}
+      new_rdd.saveAsTextFile("./src/main/grouped_tweets/earthquake_tweets");
     })
-
 
     ssc.start()
     ssc.awaitTermination()
