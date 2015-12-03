@@ -13,6 +13,7 @@ import twitter4j.json.DataObjectFactory
 
 import scala.collection.immutable.List
 import scala.collection.mutable.ListBuffer
+import scala.util.parsing.json.JSONObject
 
 /* For Stanford NLP */
 import edu.stanford.nlp.ie.AbstractSequenceClassifier
@@ -126,7 +127,30 @@ object ServiceBootstrap {
     //val stream = TwitterUtils.createStream(ssc, None, filters)
 
     //Take Twitter json data from socket
-    val stream = ssc.socketTextStream("localhost", 9998).map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status])
+    val stream = ssc.socketTextStream("localhost", 9998).filter(_.nonEmpty).map(x => {
+      try {
+        DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status]
+      } catch {
+        case ex: twitter4j.TwitterException =>{
+          println("String not proper json exception\n"+x)
+          null.asInstanceOf[twitter4j.Status]
+        }
+
+    }
+    }).filter(_!=null)
+
+    //val stream = ssc.socketTextStream("localhost", 9998).filter(_.nonEmpty).map(DataObjectFactory.createObject(_).asInstanceOf[twitter4j.Status])
+    //stream.foreachRDD(l=>{l.foreach{t => println(t)}})
+
+    /*
+    val wholefile= sc.textFile("/Users/namitsharma/Downloads/dump2.txt").filter(_.nonEmpty)
+      .map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status]).map(x=>x.getText)
+
+    val yo = wholefile.collect;
+
+    yo.map(t=>println(t));
+*/
+
 
     /* Uncomment if you wanna start saving the tweets */
     //stream.saveAsTextFiles("./src/main/tweets/earthquake_tweets");
@@ -159,17 +183,17 @@ object ServiceBootstrap {
 
     //Code for Clustering on a window goes here
     val myActivityStream = stream3
-      .map(x => (x._1,(x._2.getText,getLatLongPositions(x._1))))//(LocationString,(twitter4j.Status.getText,List(LatitudeString,LongitudeString)))
+      .map(x => (x._1,x._2.getText))//(LocationString,(twitter4j.Status.getText,List(LatitudeString,LongitudeString)))
       .window(Seconds(12*60*60), Seconds(10))
       .groupByKey() //(Location,Iterable<(twitter4j.Status.getText,List(LatitudeString,LongitudeString))>)
 
     myActivityStream.foreachRDD(rdd => {
       println("\nMy Activity (%s)".format(rdd.count()))
 
-      val new_rdd = rdd.map(x => (x._2.size,(x._1,x._2.head._2))).filter(_._1>=3).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
+      val new_rdd = rdd.map(x => (x._2.size,x._1)).filter(_._1>=1).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
 
       new_rdd.foreach{t => println(t)}
-      new_rdd.saveAsTextFile("./src/main/grouped_tweets/earthquake_tweets");
+      new_rdd.saveAsTextFile("./src/main/resources/new_saves");
     })
 
     ssc.start()
