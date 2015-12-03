@@ -139,6 +139,7 @@ object ServiceBootstrap {
     }
     }).filter(_!=null)
 
+
     //val stream = ssc.socketTextStream("localhost", 9998).filter(_.nonEmpty).map(DataObjectFactory.createObject(_).asInstanceOf[twitter4j.Status])
     //stream.foreachRDD(l=>{l.foreach{t => println(t)}})
 
@@ -149,7 +150,7 @@ object ServiceBootstrap {
     val yo = wholefile.collect;
 
     yo.map(t=>println(t));
-*/
+    */
 
 
     /* Uncomment if you wanna start saving the tweets */
@@ -183,17 +184,21 @@ object ServiceBootstrap {
 
     //Code for Clustering on a window goes here
     val myActivityStream = stream3
-      .map(x => (x._1,x._2.getText))//(LocationString,(twitter4j.Status.getText,List(LatitudeString,LongitudeString)))
-      .window(Seconds(12*60*60), Seconds(10))
-      .groupByKey() //(Location,Iterable<(twitter4j.Status.getText,List(LatitudeString,LongitudeString))>)
+      //.map(x => (x._1,Set(x._2.getText))).reduceByKeyAndWindow((m: Set[String], n: Set[String]) => m | n,Seconds(12*60*60),Seconds(10))//(LocationString,Set(twitter4j.Status.getText))
+      //.map(x => (x._1,Set((getLatLongPositions(x._2.getText),x._2.getText)))).reduceByKeyAndWindow((m: Set[(List[String],String)], n: Set[(List[String],String)]) => m | n,Seconds(12*60*60),Seconds(10))//(LocationString,Set( (List(LatitudeString,LongitudeString),(twitter4j.Status.getText))))
+      .map(x => (x._1,(getLatLongPositions(x._2.getText),x._2.getText))).window(Seconds(12*60*60),Seconds(10)).groupByKey()//(LocationString,Iterable<(List(LatitudeString,LongitudeString),(twitter4j.Status.getText))>)
+
+    //Todo: Try to use inverse function and Enable checkpointing
 
     myActivityStream.foreachRDD(rdd => {
       println("\nMy Activity (%s)".format(rdd.count()))
 
-      val new_rdd = rdd.map(x => (x._2.size,x._1)).filter(_._1>=1).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
+      //val new_rdd = rdd.map(x => (x._2.size,x._1)).filter(_._1>=1).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
+      //val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
+      val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
 
       new_rdd.foreach{t => println(t)}
-      new_rdd.saveAsTextFile("./src/main/resources/new_saves");
+      new_rdd.saveAsTextFile("./src/main/resources/new_saves2");
     })
 
     ssc.start()
