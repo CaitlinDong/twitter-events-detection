@@ -21,7 +21,11 @@ lazy val rootSettings: Seq[Setting[_]] = Seq(
 
 lazy val projSettings = rootSettings ++ Seq(
   name := "twitter-events-detection",
-  libraryDependencies := Dependencies.main
+  libraryDependencies := Dependencies.main,
+  mainClass in (Compile, run) := Some("ted.ServiceBootstrap"),
+  mainClass in (Compile, packageBin) := Some("ted.ServiceBootstrap"),
+  assemblyJarName in assembly := "twitter-events-detection.jar",
+  mainClass in assembly := Some("ted.ServiceBootstrap")
 )
 
 lazy val root = Project("twitter-events-detection", file("."))
