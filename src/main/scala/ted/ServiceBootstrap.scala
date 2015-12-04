@@ -41,6 +41,12 @@ import javax.xml.xpath.XPathFactory
 import javax.xml.xpath.XPathConstants
 import org.w3c.dom.Document
 
+
+
+import spray.json._
+import DefaultJsonProtocol._
+import scala.io.Source.fromURL
+
 /**
  * Twitter Events Detection -
  * Clusters tweets from the Twitter Stream based on location information extracted from the tweet text.
@@ -51,11 +57,11 @@ import org.w3c.dom.Document
 
 object ServiceBootstrap {
 
-  def splitForEachLocation(tweet: twitter4j.Status, locations : List[String]): List[(String,twitter4j.Status)] = {
-    val splitBuffer: ListBuffer[(String,twitter4j.Status) ] = new ListBuffer()
+  def splitForEachLocation(tweet: twitter4j.Status, locations: List[String]): List[(String, twitter4j.Status)] = {
+    val splitBuffer: ListBuffer[(String, twitter4j.Status)] = new ListBuffer()
 
-    for (i <- 0 to locations.length-1)
-      splitBuffer.append((locations(i),tweet))
+    for (i <- 0 to locations.length - 1)
+      splitBuffer.append((locations(i), tweet))
     splitBuffer.toList
   }
 
@@ -66,13 +72,12 @@ object ServiceBootstrap {
   }
 
   //@throws(classOf[Exception])
-  def getLatLongPositions(address: String): List[String] = {
+  def getLatLongFromGoogleGeocode(address: String): List[String] = {
     if(address equals("someother location"))
       {
         return List()
       }
     var responseCode: Int = 0
-    //val api: String = "http://www.datasciencetoolkit.org/maps/api/geocode/json?sensor=false&address=" + URLEncoder.encode(address, "UTF-8")
     val api: String = "http://maps.googleapis.com/maps/api/geocode/xml?address=" + URLEncoder.encode(address, "UTF-8") + "&sensor=true"
     val url: URL = new URL(api)
     val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
@@ -80,7 +85,6 @@ object ServiceBootstrap {
     responseCode = httpConnection.getResponseCode
     if (responseCode == 200) {
       val builder: DocumentBuilder = DocumentBuilderFactory.newInstance.newDocumentBuilder
-
       val document: Document = builder.parse(httpConnection.getInputStream)
       val xPathfactory: XPathFactory = XPathFactory.newInstance
       val xpath: XPath = xPathfactory.newXPath
@@ -101,7 +105,204 @@ object ServiceBootstrap {
     else List()
   }
 
+  def getLatLongFromDSTKServer(address: String): List[String] = {
+
+    if(address equals("someother location"))
+    {
+      return List()
+    }
+    case class GeoCodeLongLat(lng: Double, lat: Double)
+    case class GeoCodeViewport(northeast: GeoCodeLongLat, southwest: GeoCodeLongLat)
+    case class GeoCodeAddressComponent(long_name: String, types: Array[String], short_name: String)
+    case class GeoCodeGeometry(viewport: GeoCodeViewport, location_type: String, location: GeoCodeLongLat)
+    case class GeoCodeResult(formatted_address: String, geometry: GeoCodeGeometry, types: Array[String], address_components: Array[GeoCodeAddressComponent])
+    case class GeoCodeDocument(results: Array[GeoCodeResult], status: String)
+
+    implicit val GeoCodeLongLatJF = jsonFormat2(GeoCodeLongLat)
+    implicit val GeoCodeViewportJF = jsonFormat2(GeoCodeViewport)
+    implicit val GeoCodeAddressComponentJF = jsonFormat3(GeoCodeAddressComponent)
+    implicit val GeoCodeGeometryJF = jsonFormat3(GeoCodeGeometry)
+    implicit val GeoCodeResultJF = jsonFormat4(GeoCodeResult)
+    implicit val GeoCodeDocumentJF = jsonFormat2(GeoCodeDocument)
+
+
+    var responseCode: Int = 0
+    val api: String = "http://ec2-52-23-192-139.compute-1.amazonaws.com/maps/api/geocode/json?address=" + URLEncoder.encode(address, "UTF-8")
+    val url: URL = new URL(api)
+    val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
+    httpConnection.connect
+    responseCode = httpConnection.getResponseCode
+    if (responseCode == 200) {
+      val in: BufferedReader = new BufferedReader(new InputStreamReader(httpConnection.getInputStream))
+      var inputLine: String = null
+      val tmp: StringBuffer = new StringBuffer
+
+      while ({
+        inputLine = in.readLine; inputLine
+      } != null) {
+        tmp.append(inputLine)
+      }
+      in.close
+
+      val response = tmp.toString
+
+      println(response)
+
+      val geocode = response.parseJson.convertTo[GeoCodeDocument]
+
+      val status = geocode.status
+      if (status == "OK") {
+        val result = geocode.results.toList.head.geometry.location
+        List(result.lat.toString, result.lng.toString)
+      }
+      else {
+        //throw new Exception("Error from the API - response status: " + status)
+        List("NoCoords")
+      }
+    }
+    else List(responseCode.toString)
+  }
+
+
+  def getLatLongFromTwoFishes(address: String): List[String] = {
+
+    if(address equals("someother location"))
+    {
+      return List()
+    }
+    case class Center(
+                       lat: Double,
+                       lng: Double
+                       )
+    case class Bounds(
+                       ne: Center,
+                       sw: Center
+                       )
+    case class Geometry(
+                         center: Center,
+                         bounds: Option[Bounds],
+                         source: Option[String]
+                         )
+    case class Ids(
+                    source: String,
+                    id: String
+                    )
+    case class Names(
+                      name: String,
+                      lang: String,
+                      flags: List[Double]
+                      )
+    case class Attributes(
+                           adm0cap: Option[Double],
+                           scalerank: Option[Double],
+                           labelrank: Option[Double],
+                           natscale: Option[Double],
+                           population: Option[Double],
+                           urls: Option[List[String]],
+                           worldcity: Option[Double]
+                           )
+    case class Feature(
+                        cc: Option[String],
+                        geometry: Geometry,
+                        name: Option[String],
+                        displayName: Option[String],
+                        woeType: Option[Double],
+                        ids: Option[List[Ids]],
+                        names: Option[List[Names]],
+                        highlightedName: Option[String],
+                        matchedName: Option[String],
+                        id: Option[String],
+                        attributes: Option[Attributes],
+                        longId: Option[String],
+                        longIds: Option[List[String]],
+                        parentIds: Option[List[String]]
+                        )
+    case class Interpretations(
+                                what: String,
+                                where: String,
+                                feature: Feature
+                                )
+    case class TwoFishesJsonObject(
+                               interpretations: List[Interpretations]
+                               )
+
+
+    implicit val CenterJF = jsonFormat2(Center)
+    implicit val BoundsJF = jsonFormat2(Bounds)
+    implicit val GeometryJF = jsonFormat3(Geometry)
+    implicit val IdsJF = jsonFormat2(Ids)
+    implicit val NamesJF = jsonFormat3(Names)
+    implicit val AttributesJF = jsonFormat7(Attributes)
+    implicit val FeatureJF = jsonFormat14(Feature)
+    implicit val InterpretationsJF = jsonFormat3(Interpretations)
+    implicit val TwoFishesJsonObjectJF = jsonFormat1(TwoFishesJsonObject)
+
+    var responseCode: Int = 0
+    val api: String = "http://localhost:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") +"\"}"
+    val url: URL = new URL(api)
+    val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
+    httpConnection.connect
+    responseCode = httpConnection.getResponseCode
+    if (responseCode == 200) {
+      val in: BufferedReader = new BufferedReader(new InputStreamReader(httpConnection.getInputStream))
+      var inputLine: String = null
+      val tmp: StringBuffer = new StringBuffer
+
+      while ({
+        inputLine = in.readLine; inputLine
+      } != null) {
+        tmp.append(inputLine)
+      }
+      in.close
+
+      val response = tmp.toString
+      
+      val jsonObject = response.parseJson.convertTo[TwoFishesJsonObject]
+
+      if (jsonObject.interpretations.size>0) {
+        val coordinates = jsonObject.interpretations.head.feature.geometry.center
+        List(coordinates.lat.toString, coordinates.lng.toString)
+      }
+      else {
+        List("NoCoords")
+      }
+    }
+    else List(responseCode.toString)
+  }
+
+
+def printResponseFromTwoFishes(address: String) : Unit = {
+  var responseCode: Int = 0
+  val api: String = "http://localhost:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
+  val url: URL = new URL(api)
+  val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
+  httpConnection.connect
+  responseCode = httpConnection.getResponseCode
+  if (responseCode == 200) {
+    //println(scala.io.Source.fromInputStream(httpConnection.getInputStream).mkString)
+    val in: BufferedReader = new BufferedReader(new InputStreamReader(httpConnection.getInputStream))
+    var inputLine: String = null
+    val tmp: StringBuffer = new StringBuffer
+
+    while ( {
+      inputLine = in.readLine;
+      inputLine
+    } != null) {
+      tmp.append(inputLine)
+    }
+    in.close
+
+    val response = tmp.toString
+    println(response)
+  }
+  else{
+    println("No Response"+responseCode)
+  }
+}
+
   def main(args: Array[String]) {
+
+
 
     val myCommandlineParameters = Array("63jvU9P2FaJLcqh704yZ2rPWs","tEJwsJNPNvckcQXqJEQDNVjvE8hvitEjV6is5OvqCh1DYZLiAo","98218547-l3RyOPgaGthTDRQJxNAy2eMigpdNtNxgJxJoc9o0j","RoOTzJyMxps7meXV0cUiTjLJPuCY3GDA5rqbkFc2GmKsR","earthquake","tremor","quake","richter")
     val Array(consumerKey, consumerSecret, accessToken, accessTokenSecret) = myCommandlineParameters.take(4)
@@ -127,7 +328,7 @@ object ServiceBootstrap {
     //val stream = TwitterUtils.createStream(ssc, None, filters)
 
     //Take Twitter json data from socket
-    val stream = ssc.socketTextStream("localhost", 9998).filter(_.nonEmpty).map(x => {
+    val stream = ssc.socketTextStream("localhost", 9999).filter(_.nonEmpty).map(x => {
       try {
         DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status]
       } catch {
@@ -139,19 +340,14 @@ object ServiceBootstrap {
     }
     }).filter(_!=null)
 
-
-    //val stream = ssc.socketTextStream("localhost", 9998).filter(_.nonEmpty).map(DataObjectFactory.createObject(_).asInstanceOf[twitter4j.Status])
     //stream.foreachRDD(l=>{l.foreach{t => println(t)}})
 
     /*
     val wholefile= sc.textFile("/Users/namitsharma/Downloads/dump2.txt").filter(_.nonEmpty)
       .map(x => DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status]).map(x=>x.getText)
-
     val yo = wholefile.collect;
-
     yo.map(t=>println(t));
     */
-
 
     /* Uncomment if you wanna start saving the tweets */
     //stream.saveAsTextFiles("./src/main/tweets/earthquake_tweets");
@@ -185,8 +381,8 @@ object ServiceBootstrap {
     //Code for Clustering on a window goes here
     val myActivityStream = stream3
       //.map(x => (x._1,Set(x._2.getText))).reduceByKeyAndWindow((m: Set[String], n: Set[String]) => m | n,Seconds(12*60*60),Seconds(10))//(LocationString,Set(twitter4j.Status.getText))
-      //.map(x => (x._1,Set((getLatLongPositions(x._2.getText),x._2.getText)))).reduceByKeyAndWindow((m: Set[(List[String],String)], n: Set[(List[String],String)]) => m | n,Seconds(12*60*60),Seconds(10))//(LocationString,Set( (List(LatitudeString,LongitudeString),(twitter4j.Status.getText))))
-      .map(x => (x._1,(getLatLongPositions(x._2.getText),x._2.getText))).window(Seconds(12*60*60),Seconds(10)).groupByKey()//(LocationString,Iterable<(List(LatitudeString,LongitudeString),(twitter4j.Status.getText))>)
+      .map(x => (x._1,Set((getLatLongFromTwoFishes(x._1),x._2.getText)))).reduceByKeyAndWindow((m: Set[(List[String],String)], n: Set[(List[String],String)]) => m | n,Seconds(12*60*60),Seconds(10))//(LocationString,Set( (List(LatitudeString,LongitudeString),(twitter4j.Status.getText))))
+      //.map(x => (x._1,(getLatLongPositions(x._2.getText),x._2.getText))).window(Seconds(12*60*60),Seconds(10)).groupByKey()//(LocationString,Iterable<(List(LatitudeString,LongitudeString),(twitter4j.Status.getText))>)
 
     //Todo: Try to use inverse function and Enable checkpointing
 
@@ -194,8 +390,8 @@ object ServiceBootstrap {
       println("\nMy Activity (%s)".format(rdd.count()))
 
       //val new_rdd = rdd.map(x => (x._2.size,x._1)).filter(_._1>=1).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
-      //val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
       val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
+      //val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
 
       new_rdd.foreach{t => println(t)}
       new_rdd.saveAsTextFile("./src/main/resources/new_saves2");
