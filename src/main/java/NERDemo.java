@@ -36,10 +36,34 @@ import java.util.List;
  *  @author Jenny Finkel
  *  @author Christopher Manning
  */
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
+import javax.net.ssl.HttpsURLConnection;
 public class NERDemo {
 
     public static void main(String[] args) throws Exception {
+
+
+        String url = "http://www.google.com/search?q=mkyong";
+
+        URL obj = new URL(url);
+        HttpURLConnection con = (HttpURLConnection) obj.openConnection();
+
+        BufferedReader in = new BufferedReader(
+                new InputStreamReader(con.getInputStream()));
+        String inputLine;
+        StringBuffer response = new StringBuffer();
+
+        while ((inputLine = in.readLine()) != null) {
+            response.append(inputLine);
+        }
+        in.close();
+
+
         //CRFClassifier crf = new CRFClassifier();
 
         String serializedClassifier = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz";

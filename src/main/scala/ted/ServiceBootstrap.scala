@@ -66,7 +66,8 @@ object ServiceBootstrap {
   }
 
   def extractLocations(tweetText: String): List[String] = {
-    if (tweetText.contains("<LOCATION>"))
+    val tweetTextCapitalised = tweetText.split(" ").map(x=>x.capitalize).mkString
+    if (tweetTextCapitalised.contains("<LOCATION>"))
       StringUtils.substringsBetween(tweetText, "<LOCATION>", "</LOCATION>").toList.map(_.toLowerCase)
     else List("No Location")
   }
@@ -238,7 +239,7 @@ object ServiceBootstrap {
     implicit val TwoFishesJsonObjectJF = jsonFormat1(TwoFishesJsonObject)
 
     var responseCode: Int = 0
-    val api: String = "http://localhost:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") +"\"}"
+    val api: String = "http://ec2-52-90-221-143.compute-1.amazonaws.com:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
     val url: URL = new URL(api)
     val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
     httpConnection.connect
@@ -256,7 +257,9 @@ object ServiceBootstrap {
       in.close
 
       val response = tmp.toString
-      
+
+      println(response)
+
       val jsonObject = response.parseJson.convertTo[TwoFishesJsonObject]
 
       if (jsonObject.interpretations.size>0) {
@@ -273,7 +276,8 @@ object ServiceBootstrap {
 
 def printResponseFromTwoFishes(address: String) : Unit = {
   var responseCode: Int = 0
-  val api: String = "http://localhost:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
+  //val api: String = "http://localhost:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
+  val api: String = "http://ec2-52-90-221-143.compute-1.amazonaws.com:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
   val url: URL = new URL(api)
   val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
   httpConnection.connect
@@ -301,8 +305,6 @@ def printResponseFromTwoFishes(address: String) : Unit = {
 }
 
   def main(args: Array[String]) {
-
-
 
     val myCommandlineParameters = Array("63jvU9P2FaJLcqh704yZ2rPWs","tEJwsJNPNvckcQXqJEQDNVjvE8hvitEjV6is5OvqCh1DYZLiAo","98218547-l3RyOPgaGthTDRQJxNAy2eMigpdNtNxgJxJoc9o0j","RoOTzJyMxps7meXV0cUiTjLJPuCY3GDA5rqbkFc2GmKsR","earthquake","tremor","quake","richter")
     val Array(consumerKey, consumerSecret, accessToken, accessTokenSecret) = myCommandlineParameters.take(4)
@@ -340,6 +342,7 @@ def printResponseFromTwoFishes(address: String) : Unit = {
     }
     }).filter(_!=null)
 
+
     //stream.foreachRDD(l=>{l.foreach{t => println(t)}})
 
     /*
@@ -352,20 +355,26 @@ def printResponseFromTwoFishes(address: String) : Unit = {
     /* Uncomment if you wanna start saving the tweets */
     //stream.saveAsTextFiles("./src/main/tweets/earthquake_tweets");
 
+
+
+    //Filter based on words that cause False Positives
+    val stream2 = stream.filter( x => {
+      val tokenizedTweet = x.getText.split(" ").toList.map(_.toLowerCase)
+      !((tokenizedTweet contains "concert") ||  (tokenizedTweet contains "conference") || (tokenizedTweet contains "lecture") || (tokenizedTweet contains "drill") || (tokenizedTweet contains "song") || (tokenizedTweet contains "predict") || (tokenizedTweet contains "video"))
+    })
+
+
     //Declaring lazy NERClassifier
     var serializedClassifier: String = "src/main/resources/classifiers/english.all.3class.distsim.crf.ser.gz"
     object NER {
       @transient lazy val classifier: AbstractSequenceClassifier[CoreLabel] = CRFClassifier.getClassifier(serializedClassifier)
     }
 
-    //Location Extraction using Stanford's NER
-    val stream2 = stream
+    //Location Extraction using Stanford's NER, and filter the ones that don't have any location in them
+    val stream3 = stream2
       .map(x => (x,extractLocations(NER.classifier.classifyWithInlineXML(x.getText))))//(twitter4j.Status,List[LocationString])
-      .map(x => {
-        if (x._2.head equals "No Location"){
-          (x._1,List("someother location"))
-        }
-        else x
+      .filter(x => {
+        !(x._2.head equals "No Location")
       })
 
     //Todo
@@ -376,12 +385,13 @@ def printResponseFromTwoFishes(address: String) : Unit = {
     //val locationsHaspMap = sc.textFile("src/main/resources/coordinates");
 
     //Split record by location
-    val stream3 = stream2.flatMap(t => splitForEachLocation(t._1,t._2))//(LocationString,twitter4j.Status)
+    val stream4 = stream3.flatMap(t => splitForEachLocation(t._1,t._2))//(LocationString,twitter4j.Status)
 
     //Code for Clustering on a window goes here
-    val myActivityStream = stream3
+    val myActivityStream = stream4
       //.map(x => (x._1,Set(x._2.getText))).reduceByKeyAndWindow((m: Set[String], n: Set[String]) => m | n,Seconds(12*60*60),Seconds(10))//(LocationString,Set(twitter4j.Status.getText))
       .map(x => (x._1,Set((getLatLongFromTwoFishes(x._1),x._2.getText)))).reduceByKeyAndWindow((m: Set[(List[String],String)], n: Set[(List[String],String)]) => m | n,Seconds(12*60*60),Seconds(10))//(LocationString,Set( (List(LatitudeString,LongitudeString),(twitter4j.Status.getText))))
+      //.map(x => (x._1,Set(x._2.getText))).reduceByKeyAndWindow((m: Set[String], n: Set[String]) => m | n,Seconds(12*60*60),Seconds(10)).map(x=>(x._1,getLatLongFromTwoFishes(x._1),x._2))//(LocationString,List(LatitudeString,LongitudeString),Set(twitter4j.Status.getText))))
       //.map(x => (x._1,(getLatLongPositions(x._2.getText),x._2.getText))).window(Seconds(12*60*60),Seconds(10)).groupByKey()//(LocationString,Iterable<(List(LatitudeString,LongitudeString),(twitter4j.Status.getText))>)
 
     //Todo: Try to use inverse function and Enable checkpointing
@@ -390,11 +400,12 @@ def printResponseFromTwoFishes(address: String) : Unit = {
       println("\nMy Activity (%s)".format(rdd.count()))
 
       //val new_rdd = rdd.map(x => (x._2.size,x._1)).filter(_._1>=1).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
-      val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
+      val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1,x._2._2.head._2)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
+      //val new_rdd = rdd.map(x => (x._3.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
       //val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
 
       new_rdd.foreach{t => println(t)}
-      new_rdd.saveAsTextFile("./src/main/resources/new_saves2");
+      new_rdd.saveAsTextFile("./src/main/resources/new_saves_fromAWS");
     })
 
     ssc.start()
