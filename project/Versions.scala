@@ -1,4 +1,4 @@
 object Versions {
-  val scalaV = "2.11.7"
-  val sparkV = "1.5.0"
+  val scalaV = "2.10.5"
+  val sparkV = "1.5.2"
 }
