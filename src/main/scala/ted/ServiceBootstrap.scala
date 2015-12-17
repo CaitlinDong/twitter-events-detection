@@ -239,7 +239,9 @@ object ServiceBootstrap {
     implicit val TwoFishesJsonObjectJF = jsonFormat1(TwoFishesJsonObject)
 
     var responseCode: Int = 0
-    val api: String = "http://ec2-52-90-221-143.compute-1.amazonaws.com:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
+    //val api: String = "http://ec2-52-23-200-1.compute-1.amazonaws.com:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
+    val api: String = "http://localhost:8081/search/geocode?json={\"query\":\"" + URLEncoder.encode(address, "UTF-8") + "\"}"
+
     val url: URL = new URL(api)
     val httpConnection: HttpURLConnection = url.openConnection.asInstanceOf[HttpURLConnection]
     httpConnection.connect
@@ -327,10 +329,11 @@ def printResponseFromTwoFishes(address: String) : Unit = {
     val ssc = new StreamingContext(sc, Seconds(2))
 
     //Create stream from twitter
-    //val stream = TwitterUtils.createStream(ssc, None, filters)
+    val stream = TwitterUtils.createStream(ssc, None, filters)
 
     //Take Twitter json data from socket
-    val stream = ssc.socketTextStream("localhost", 9999).filter(_.nonEmpty).map(x => {
+   /*
+   val stream = ssc.socketTextStream("localhost", 9999).filter(_.nonEmpty).map(x => {
       try {
         DataObjectFactory.createObject(x).asInstanceOf[twitter4j.Status]
       } catch {
@@ -341,6 +344,7 @@ def printResponseFromTwoFishes(address: String) : Unit = {
 
     }
     }).filter(_!=null)
+    */
 
 
     //stream.foreachRDD(l=>{l.foreach{t => println(t)}})
@@ -396,17 +400,27 @@ def printResponseFromTwoFishes(address: String) : Unit = {
 
     //Todo: Try to use inverse function and Enable checkpointing
 
+    //Set( (List(LatitudeString,LongitudeString),(twitter4j.Status.getText))
+    def topTweets( mySet: Set[(List[String],String)], count : Int) : String = {
+      mySet.map(x=>x._2)
+        //.filterNot(x=> (x contains "https://") || (x contains "http://"))
+        .take(count).map(_.replace('\n',' ')).mkString("||||")
+    }
+
     myActivityStream.foreachRDD(rdd => {
       println("\nMy Activity (%s)".format(rdd.count()))
 
       //val new_rdd = rdd.map(x => (x._2.size,x._1)).filter(_._1>=1).sortByKey(false) //(TweetCountByLocation,(Location,List(LatitudeString,LongitudeString))
-      val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1,x._2._2.head._2)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
+      val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1, x._2._1.split(" ").map(x=>x.capitalize).mkString, x._2._2.head._1, topTweets(x._2._2,5))) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
       //val new_rdd = rdd.map(x => (x._3.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
       //val new_rdd = rdd.map(x => (x._2.size,x)).sortByKey(false).filter(_._1>=1).map(x=>(x._1,x._2._1,x._2._2.head._1)) //(TweetCountByLocation,Location,List(LatitudeString,LongitudeString))
 
       new_rdd.foreach{t => println(t)}
-      new_rdd.saveAsTextFile("./src/main/resources/new_saves_fromAWS");
+      new_rdd.saveAsTextFile("/Users/namitsharma/workspace/EQ_live_visualization/eq_data_spark")
     })
+
+
+
 
     ssc.start()
     ssc.awaitTermination()
